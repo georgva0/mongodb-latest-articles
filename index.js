@@ -1,6 +1,7 @@
 const { Consumer } = require ('sqs-consumer');
 const { SQSClient } = require ('@aws-sdk/client-sqs');
-const mongo = require('./helpers/mongoDb_async')
+const mongo = require('./helpers/mongoDb_async');
+require('dotenv').config();
 
 const myAccessKey = process.env['AWS_ACCESS_KEY_ID'];
 const mySecret = process.env['AWS_SECRET_ACCESS_KEY'];

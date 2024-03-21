@@ -31,7 +31,7 @@ exports.writeToMongoExtended = async (document) => {
       if (checkDate === 0){
         //if there are no documents counted under the document's date, create a new document
         await db.collection("aresReports").insertOne({date:cmsDate, serviceStatus:[{home:document.passport.home, count:1}]});
-        console.log(`An entry for ${cmsDate} has been created in the logs`)
+        console.log(`An entry for ${cmsDate} has been added to the logs`)
       }  
       
       else {
