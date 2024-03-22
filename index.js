@@ -7,13 +7,13 @@ const myAccessKey = process.env['AWS_ACCESS_KEY_ID'];
 const mySecret = process.env['AWS_SECRET_ACCESS_KEY'];
 
 const app = Consumer.create({
-  queueUrl: 'https://sqs.eu-west-1.amazonaws.com/654654414593/AresQueue',
-  // queueUrl: 'https://sqs.eu-west-1.amazonaws.com/654654414593/BBCAresQueue',
+  // queueUrl: 'https://sqs.eu-west-1.amazonaws.com/654654414593/AresQueue',
+  queueUrl: 'https://sqs.eu-west-1.amazonaws.com/654654414593/BBCAresQueue',
   handleMessage: async (message) => {
     let body = JSON.parse(message['Body']);
     let mes = JSON.parse(body.Message);
 
-    //send content to MongoDB
+    //send ARES notification load to MongoDB and update logs
     await mongo.writeToMongoExtended(mes);
     console.log(`Content dispatched and logs updated`)
   },

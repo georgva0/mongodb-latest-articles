@@ -4,7 +4,7 @@ Mongo.writeToMongoExtended(
 
   {
     "urn" : "urn:bbc:ares::article:c72key7z4j3o",
-    "action" : "Published",
+    "action" : "Updated",
     "passport" : {
       "language" : "es",
       "home" : "http://www.bbc.co.uk/ontologies/passport/home/Gahuza",
