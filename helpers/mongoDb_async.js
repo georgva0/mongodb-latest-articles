@@ -21,54 +21,102 @@ exports.writeToMongoExtended = async (document) => {
 
   let db = client.db("WorldServiceData");
   try {
+    const check = await db
+      .collection("aresData")
+      .countDocuments({ urn: document.urn }, { limit: 1 });
+    let storedDocument;
 
-    //log document
-    if(document.action === "Published"){
-      //check if there are any documents counted under the document's date
-      const cmsDate = new Date(document.cmsNotificationTimestamp).toLocaleDateString('en-UK');
-      const checkDate = await db.collection("aresReports").countDocuments({date:cmsDate}, { limit: 1 });
-
-      if (checkDate === 0){
-        //if there are no documents counted under the document's date, create a new document
-        await db.collection("aresReports").insertOne({date:cmsDate, serviceStatus:[{home:document.passport.home, count:1}]});
-        console.log(`An entry for ${cmsDate} has been added to the logs`)
-      }  
-      
-      else {
-        const target = await db.collection("aresReports").findOne({date:cmsDate});
-        //if there are documents counted under the document's date, for this service, increment the count
-        if (target.serviceStatus.map(x => x.home).includes(document.passport.home)){
-          await db.collection("aresReports").updateOne({date:cmsDate, "serviceStatus.home":document.passport.home }, {$inc: {"serviceStatus.$.count":1}});
-          console.log(`An entry for ${cmsDate} has been incremented`)
-        } else {
-          await db.collection("aresReports").updateOne({date:cmsDate}, {$push: {"serviceStatus":{home:document.passport.home, count:1}}} )
-        }
-
-        console.log(`Service ${document.passport.home} has been added to ${cmsDate}`)
-
-      }
-    }
-    //end of document log
-    
-    const check = await db.collection("aresData").countDocuments({urn:document.urn}, { limit: 1 });
-
-    if (check === 0){
-      await db.collection("aresData").insertOne(document);
+    if (check === 0) {
+      const result = await db.collection("aresData").insertOne(document);
+      storedDocument = { _id: result.insertedId };
       console.log(`New document uploaded`);
     } else {
-      await db.collection("aresData").replaceOne({urn:document.urn}, document);
+      storedDocument = await db
+        .collection("aresData")
+        .findOne({ urn: document.urn }, { projection: { _id: 1 } });
+      await db
+        .collection("aresData")
+        .replaceOne({ urn: document.urn }, document);
       console.log(`Document updated`);
     }
 
     //purge older documents
-    const updatedCollection = await db.collection("aresData").find({"passport.language":document.passport.language}).sort({cmsNotificationTimestamp:-1}).toArray();
+    const updatedCollection = await db
+      .collection("aresData")
+      .find({ "passport.language": document.passport.language })
+      .sort({ cmsNotificationTimestamp: -1 })
+      .toArray();
 
     const itemsToDelete = updatedCollection.slice(30);
 
-    await db.collection("aresData").deleteMany({ _id: { $in: itemsToDelete.map(v => v._id) } });
-  
-    console.log(`Purged ${itemsToDelete.length} documents`);  
-    
+    await db
+      .collection("aresData")
+      .deleteMany({ _id: { $in: itemsToDelete.map((v) => v._id) } });
+
+    console.log(`Purged ${itemsToDelete.length} documents`);
+
+    //log document
+
+    const cmsDate = new Date(
+      document.cmsNotificationTimestamp,
+    ).toLocaleDateString("en-UK");
+    const mongoInputDate = new Date(
+      storedDocument._id.getTimestamp(),
+    ).toLocaleDateString("en-GB");
+    // const todayDate = new Date().toLocaleDateString('en-UK');
+
+    if (document.action === "Published" && cmsDate === mongoInputDate) {
+      //check if there are any documents counted under the document's date
+
+      const checkDate = await db
+        .collection("aresReports")
+        .countDocuments({ date: cmsDate }, { limit: 1 });
+
+      if (checkDate === 0) {
+        //if there are no documents counted under the document's date, create a new entry
+        await db
+          .collection("aresReports")
+          .insertOne({
+            date: cmsDate,
+            serviceStatus: [{ home: document.passport.home, count: 1 }],
+          });
+        console.log(`An entry for ${cmsDate} has been added to the logs`);
+      } else {
+        const target = await db
+          .collection("aresReports")
+          .findOne({ date: cmsDate });
+        //if there are documents counted under the document's date, for this service, increment the count
+        if (
+          target.serviceStatus
+            .map((x) => x.home)
+            .includes(document.passport.home)
+        ) {
+          await db
+            .collection("aresReports")
+            .updateOne(
+              { date: cmsDate, "serviceStatus.home": document.passport.home },
+              { $inc: { "serviceStatus.$.count": 1 } },
+            );
+          console.log(`An entry for ${cmsDate} has been incremented`);
+        } else {
+          await db
+            .collection("aresReports")
+            .updateOne(
+              { date: cmsDate },
+              {
+                $push: {
+                  serviceStatus: { home: document.passport.home, count: 1 },
+                },
+              },
+            );
+        }
+
+        console.log(
+          `Service ${document.passport.home} has been added to ${cmsDate}`,
+        );
+      }
+    }
+    //end of document log
   } finally {
     client.close();
   }
