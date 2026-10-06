@@ -4,7 +4,17 @@ const ares = require("./ares");
 dotenv.config();
 const connectionString = `mongodb+srv://${process.env["MONGO_DB_USERNAME"]}:${process.env["MONGO_DB_PASSWORD"]}@cluster0.aaxi8.mongodb.net/?retryWrites=true&w=majority`;
 
+const rejectEmptyArticlesJson = (document) => {
+  if (
+    Array.isArray(document?.articlesJson) &&
+    document.articlesJson.length === 0
+  ) {
+    throw new Error("Refusing to write a document with empty articlesJson");
+  }
+};
+
 exports.writeToMongo = async (document) => {
+  rejectEmptyArticlesJson(document);
   let client = await MongoClient.connect(connectionString);
 
   let db = client.db("WorldServiceData");
@@ -18,6 +28,7 @@ exports.writeToMongo = async (document) => {
 };
 
 exports.writeToMongoExtended = async (document) => {
+  rejectEmptyArticlesJson(document);
   const enrichedDocument = await ares.enrichDocument(document);
   console.log("Enriched ARES fields:", {
     canonicalUrl: enrichedDocument.metadata?.locators?.canonicalUrl,
