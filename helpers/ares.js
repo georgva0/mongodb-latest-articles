@@ -18,9 +18,9 @@ exports.extractArticleId = (urn) => {
   return match[1];
 };
 
-exports.enrichDocument = async (document) => {
+exports.enrichDocument = async (document, articleResponse) => {
   const articleId = exports.extractArticleId(document.urn);
-  const article = await exports.getArticle(articleId);
+  const article = articleResponse ?? (await exports.getArticle(articleId));
 
   if (!article || article === "404") {
     throw new Error(`ARES article not found: ${articleId}`);

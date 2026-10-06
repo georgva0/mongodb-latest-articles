@@ -29,7 +29,20 @@ exports.writeToMongo = async (document) => {
 
 exports.writeToMongoExtended = async (document) => {
   rejectEmptyArticlesJson(document);
-  const enrichedDocument = await ares.enrichDocument(document);
+  const articleId = ares.extractArticleId(document.urn);
+  const rawArticle = await ares.getArticle(articleId);
+  if (
+    !rawArticle ||
+    rawArticle === "404" ||
+    typeof rawArticle !== "object" ||
+    Array.isArray(rawArticle)
+  ) {
+    throw new Error(
+      `ARES returned an invalid article response for ${articleId}`,
+    );
+  }
+
+  const enrichedDocument = await ares.enrichDocument(document, rawArticle);
   console.log("Enriched ARES fields:", {
     canonicalUrl: enrichedDocument.metadata?.locators?.canonicalUrl,
     createdBy: enrichedDocument.metadata?.createdBy,
@@ -43,6 +56,32 @@ exports.writeToMongoExtended = async (document) => {
 
   let db = client.db("WorldServiceData");
   try {
+    const rawCollection = db.collection("aresRaw");
+    const createdBy = rawArticle.metadata?.createdBy;
+    const creatorFilter =
+      createdBy === undefined
+        ? { "metadata.createdBy": { $exists: false } }
+        : createdBy === null
+          ? { "metadata.createdBy": { $type: 10 } }
+          : { "metadata.createdBy": createdBy };
+    const rawDocumentsToDelete = await rawCollection
+      .find(creatorFilter, { projection: { _id: 1 } })
+      .sort({ _id: -1 })
+      .skip(9)
+      .toArray();
+
+    if (rawDocumentsToDelete.length > 0) {
+      const result = await rawCollection.deleteMany({
+        _id: { $in: rawDocumentsToDelete.map((rawDocument) => rawDocument._id) },
+      });
+      console.log(
+        `Pruned ${result.deletedCount} older ARES raw documents for ${createdBy ?? "missing creator"}`,
+      );
+    }
+
+    await rawCollection.insertOne(rawArticle);
+    console.log(`Raw ARES article ${articleId} uploaded`);
+
     const check = await db
       .collection("aresData")
       .countDocuments({ urn: enrichedDocument.urn }, { limit: 1 });
