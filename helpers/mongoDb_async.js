@@ -57,30 +57,69 @@ exports.writeToMongoExtended = async (document) => {
   let db = client.db("WorldServiceData");
   try {
     const rawCollection = db.collection("aresRaw");
-    const createdBy = rawArticle.metadata?.createdBy;
-    const creatorFilter =
-      createdBy === undefined
-        ? { "metadata.createdBy": { $exists: false } }
-        : createdBy === null
-          ? { "metadata.createdBy": { $type: 10 } }
-          : { "metadata.createdBy": createdBy };
-    const rawDocumentsToDelete = await rawCollection
-      .find(creatorFilter, { projection: { _id: 1 } })
-      .sort({ _id: -1 })
-      .skip(9)
-      .toArray();
+    const cueCanonicalUrl =
+      document.metadata?.locators?.canonicalUrl ||
+      document.locators?.canonicalUrl;
+    const rawCanonicalUrl =
+      rawArticle.metadata?.locators?.canonicalUrl ||
+      rawArticle.locators?.canonicalUrl;
 
-    if (rawDocumentsToDelete.length > 0) {
-      const result = await rawCollection.deleteMany({
-        _id: { $in: rawDocumentsToDelete.map((rawDocument) => rawDocument._id) },
-      });
-      console.log(
-        `Pruned ${result.deletedCount} older ARES raw documents for ${createdBy ?? "missing creator"}`,
+    if (typeof cueCanonicalUrl !== "string" || cueCanonicalUrl.length === 0) {
+      console.error(
+        `Skipping raw ARES article ${articleId}: queue notification has no canonical URL`,
       );
-    }
+    } else if (
+      typeof rawCanonicalUrl !== "string" ||
+      rawCanonicalUrl.length === 0
+    ) {
+      console.error(
+        `Skipping raw ARES article ${articleId}: ARES response has no canonical URL`,
+      );
+    } else if (rawCanonicalUrl !== cueCanonicalUrl) {
+      console.error(
+        `Skipping raw ARES article ${articleId}: queue and ARES canonical URLs do not match`,
+      );
+    } else {
+      const existingRawArticle = await rawCollection.findOne({
+        $or: [
+          { "metadata.locators.canonicalUrl": cueCanonicalUrl },
+          { "locators.canonicalUrl": cueCanonicalUrl },
+        ],
+      });
 
-    await rawCollection.insertOne(rawArticle);
-    console.log(`Raw ARES article ${articleId} uploaded`);
+      if (existingRawArticle) {
+        console.log(
+          `Raw ARES article ${articleId} skipped: canonical URL already exists`,
+        );
+      } else {
+        const createdBy = rawArticle.metadata?.createdBy;
+        const creatorFilter =
+          createdBy === undefined
+            ? { "metadata.createdBy": { $exists: false } }
+            : createdBy === null
+              ? { "metadata.createdBy": { $type: 10 } }
+              : { "metadata.createdBy": createdBy };
+        const rawDocumentsToDelete = await rawCollection
+          .find(creatorFilter, { projection: { _id: 1 } })
+          .sort({ _id: -1 })
+          .skip(9)
+          .toArray();
+
+        if (rawDocumentsToDelete.length > 0) {
+          const result = await rawCollection.deleteMany({
+            _id: {
+              $in: rawDocumentsToDelete.map((rawDocument) => rawDocument._id),
+            },
+          });
+          console.log(
+            `Pruned ${result.deletedCount} older ARES raw documents for ${createdBy ?? "missing creator"}`,
+          );
+        }
+
+        await rawCollection.insertOne(rawArticle);
+        console.log(`Raw ARES article ${articleId} uploaded`);
+      }
+    }
 
     const check = await db
       .collection("aresData")
