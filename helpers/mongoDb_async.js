@@ -3,6 +3,29 @@ const dotenv = require("dotenv");
 const ares = require("./ares");
 dotenv.config();
 const connectionString = `mongodb+srv://${process.env["MONGO_DB_USERNAME"]}:${process.env["MONGO_DB_PASSWORD"]}@cluster0.aaxi8.mongodb.net/?retryWrites=true&w=majority`;
+let aresDataCanonicalUrlIndexPromise;
+
+const ensureAresDataCanonicalUrlIndex = (collection) => {
+  if (!aresDataCanonicalUrlIndexPromise) {
+    aresDataCanonicalUrlIndexPromise = collection
+      .createIndex(
+        { "metadata.locators.canonicalUrl": 1 },
+        {
+          name: "unique_aresData_canonicalUrl",
+          unique: true,
+          partialFilterExpression: {
+            "metadata.locators.canonicalUrl": { $type: "string" },
+          },
+        },
+      )
+      .catch((error) => {
+        aresDataCanonicalUrlIndexPromise = undefined;
+        throw error;
+      });
+  }
+
+  return aresDataCanonicalUrlIndexPromise;
+};
 
 const rejectEmptyArticlesJson = (document) => {
   if (
@@ -121,24 +144,65 @@ exports.writeToMongoExtended = async (document) => {
       }
     }
 
-    const check = await db
-      .collection("aresData")
-      .countDocuments({ urn: enrichedDocument.urn }, { limit: 1 });
+    const aresDataCollection = db.collection("aresData");
+    const canonicalUrl =
+      rawArticle.metadata?.locators?.canonicalUrl ||
+      rawArticle.locators?.canonicalUrl ||
+      enrichedDocument.metadata?.locators?.canonicalUrl ||
+      enrichedDocument.locators?.canonicalUrl;
+    if (typeof canonicalUrl === "string" && canonicalUrl.length > 0) {
+      enrichedDocument.metadata = {
+        ...enrichedDocument.metadata,
+        locators: {
+          ...enrichedDocument.metadata?.locators,
+          canonicalUrl,
+        },
+      };
+      await ensureAresDataCanonicalUrlIndex(aresDataCollection);
+    }
+
     let storedDocument;
 
-    if (check === 0) {
-      const result = await db
-        .collection("aresData")
-        .insertOne(enrichedDocument);
-      storedDocument = { _id: result.insertedId };
-      console.log(`New document uploaded`);
+    if (typeof canonicalUrl === "string" && canonicalUrl.length > 0) {
+      const existingDocument = await aresDataCollection.findOne(
+        {
+          $or: [
+            { "metadata.locators.canonicalUrl": canonicalUrl },
+            { "locators.canonicalUrl": canonicalUrl },
+          ],
+        },
+        { projection: { _id: 1 } },
+      );
+
+      if (existingDocument) {
+        await aresDataCollection.replaceOne(
+          { _id: existingDocument._id },
+          enrichedDocument,
+        );
+        storedDocument = existingDocument;
+        console.log(`Document with canonical URL updated`);
+      } else {
+        const result = await aresDataCollection.insertOne(enrichedDocument);
+        storedDocument = { _id: result.insertedId };
+        console.log(`New document uploaded`);
+      }
     } else {
-      storedDocument = await db
-        .collection("aresData")
-        .findOne({ urn: enrichedDocument.urn }, { projection: { _id: 1 } });
-      await db
-        .collection("aresData")
-        .replaceOne({ urn: enrichedDocument.urn }, enrichedDocument);
+      const existingDocument = await aresDataCollection.findOne(
+        { urn: enrichedDocument.urn },
+        { projection: { _id: 1 } },
+      );
+
+      if (existingDocument) {
+        await aresDataCollection.replaceOne(
+          { _id: existingDocument._id },
+          enrichedDocument,
+        );
+        storedDocument = existingDocument;
+      } else {
+        const result = await aresDataCollection.insertOne(enrichedDocument);
+        storedDocument = { _id: result.insertedId };
+        console.log(`New document uploaded`);
+      }
     }
 
     //purge older documents
