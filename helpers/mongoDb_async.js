@@ -115,30 +115,6 @@ exports.writeToMongoExtended = async (document) => {
           `Raw ARES article ${articleId} skipped: canonical URL already exists`,
         );
       } else {
-        const createdBy = rawArticle.metadata?.createdBy;
-        const creatorFilter =
-          createdBy === undefined
-            ? { "metadata.createdBy": { $exists: false } }
-            : createdBy === null
-              ? { "metadata.createdBy": { $type: 10 } }
-              : { "metadata.createdBy": createdBy };
-        const rawDocumentsToDelete = await rawCollection
-          .find(creatorFilter, { projection: { _id: 1 } })
-          .sort({ _id: -1 })
-          .skip(9)
-          .toArray();
-
-        if (rawDocumentsToDelete.length > 0) {
-          const result = await rawCollection.deleteMany({
-            _id: {
-              $in: rawDocumentsToDelete.map((rawDocument) => rawDocument._id),
-            },
-          });
-          console.log(
-            `Pruned ${result.deletedCount} older ARES raw documents for ${createdBy ?? "missing creator"}`,
-          );
-        }
-
         await rawCollection.insertOne(rawArticle);
         console.log(`Raw ARES article ${articleId} uploaded`);
       }
@@ -205,21 +181,6 @@ exports.writeToMongoExtended = async (document) => {
       }
     }
 
-    //purge older documents
-    const updatedCollection = await db
-      .collection("aresData")
-      .find({ "passport.language": enrichedDocument.passport.language })
-      .sort({ cmsNotificationTimestamp: -1 })
-      .toArray();
-
-    const itemsToDelete = updatedCollection.slice(30);
-
-    await db
-      .collection("aresData")
-      .deleteMany({ _id: { $in: itemsToDelete.map((v) => v._id) } });
-
-    console.log(`Purged ${itemsToDelete.length} documents`);
-
     //log document
 
     const cmsDate = new Date(
@@ -284,6 +245,65 @@ exports.writeToMongoExtended = async (document) => {
     //end of document log
   } finally {
     client.close();
+  }
+};
+
+exports.cleanOldAresArticles = async (now = new Date()) => {
+  if (!(now instanceof Date) || Number.isNaN(now.getTime())) {
+    throw new TypeError("Cleanup time must be a valid Date");
+  }
+
+  const cutoff = new Date(now);
+  const dayOfMonth = cutoff.getUTCDate();
+  cutoff.setUTCDate(1);
+  cutoff.setUTCMonth(cutoff.getUTCMonth() - 1);
+  const lastDayOfCutoffMonth = new Date(
+    Date.UTC(cutoff.getUTCFullYear(), cutoff.getUTCMonth() + 1, 0),
+  ).getUTCDate();
+  cutoff.setUTCDate(Math.min(dayOfMonth, lastDayOfCutoffMonth));
+
+  const client = await MongoClient.connect(connectionString);
+  try {
+    const db = client.db("WorldServiceData");
+    const olderThanCutoff = {
+      $expr: {
+        $let: {
+          vars: {
+            firstPublished: {
+              $convert: {
+                input: "$metadata.firstPublished",
+                to: "date",
+                onError: null,
+                onNull: null,
+              },
+            },
+          },
+          in: {
+            $and: [
+              { $ne: ["$$firstPublished", null] },
+              { $lt: ["$$firstPublished", cutoff] },
+            ],
+          },
+        },
+      },
+    };
+
+    const rawResult = await db
+      .collection("aresRaw")
+      .deleteMany(olderThanCutoff);
+    const dataResult = await db
+      .collection("aresData")
+      .deleteMany(olderThanCutoff);
+
+    console.log(
+      `Removed ${rawResult.deletedCount} old documents from aresRaw and ${dataResult.deletedCount} from aresData (before ${cutoff.toISOString()})`,
+    );
+    return {
+      aresRaw: rawResult.deletedCount,
+      aresData: dataResult.deletedCount,
+    };
+  } finally {
+    await client.close();
   }
 };
 
