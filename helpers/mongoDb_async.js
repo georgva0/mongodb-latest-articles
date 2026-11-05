@@ -253,14 +253,7 @@ exports.cleanOldAresArticles = async (now = new Date()) => {
     throw new TypeError("Cleanup time must be a valid Date");
   }
 
-  const cutoff = new Date(now);
-  const dayOfMonth = cutoff.getUTCDate();
-  cutoff.setUTCDate(1);
-  cutoff.setUTCMonth(cutoff.getUTCMonth() - 1);
-  const lastDayOfCutoffMonth = new Date(
-    Date.UTC(cutoff.getUTCFullYear(), cutoff.getUTCMonth() + 1, 0),
-  ).getUTCDate();
-  cutoff.setUTCDate(Math.min(dayOfMonth, lastDayOfCutoffMonth));
+  const cutoff = new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000);
 
   const client = await MongoClient.connect(connectionString);
   try {
