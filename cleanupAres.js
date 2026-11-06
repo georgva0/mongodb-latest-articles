@@ -19,7 +19,7 @@ const run = async () => {
   const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
   log(
     "SUCCESS",
-    `removed ${result.aresRaw} from aresRaw and ${result.aresData} from aresData in ${seconds}s`,
+    `removed ${result.aresRaw} from aresRaw and ${result.aresData} from aresData; trimmed expired articles from ${result.latestDocumentsUpdated} latest documents and removed ${result.latestDocumentsDeleted} empty latest documents in ${seconds}s`,
   );
 };
 

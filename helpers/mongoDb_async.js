@@ -36,6 +36,27 @@ const rejectEmptyArticlesJson = (document) => {
   }
 };
 
+const isFirstPublishedBefore = (input, cutoff) => ({
+  $let: {
+    vars: {
+      firstPublished: {
+        $convert: {
+          input,
+          to: "date",
+          onError: null,
+          onNull: null,
+        },
+      },
+    },
+    in: {
+      $and: [
+        { $ne: ["$$firstPublished", null] },
+        { $lt: ["$$firstPublished", cutoff] },
+      ],
+    },
+  },
+});
+
 exports.writeToMongo = async (document) => {
   rejectEmptyArticlesJson(document);
   let client = await MongoClient.connect(connectionString);
@@ -259,26 +280,7 @@ exports.cleanOldAresArticles = async (now = new Date()) => {
   try {
     const db = client.db("WorldServiceData");
     const olderThanCutoff = {
-      $expr: {
-        $let: {
-          vars: {
-            firstPublished: {
-              $convert: {
-                input: "$metadata.firstPublished",
-                to: "date",
-                onError: null,
-                onNull: null,
-              },
-            },
-          },
-          in: {
-            $and: [
-              { $ne: ["$$firstPublished", null] },
-              { $lt: ["$$firstPublished", cutoff] },
-            ],
-          },
-        },
-      },
+      $expr: isFirstPublishedBefore("$metadata.firstPublished", cutoff),
     };
 
     const rawResult = await db
@@ -287,13 +289,55 @@ exports.cleanOldAresArticles = async (now = new Date()) => {
     const dataResult = await db
       .collection("aresData")
       .deleteMany(olderThanCutoff);
+    const latestCollection = db.collection("latest");
+    const expiredLatestArticle = isFirstPublishedBefore(
+      "$$article.metadata.firstPublished",
+      cutoff,
+    );
+    const latestResult = await latestCollection.updateMany(
+      {
+        articlesJson: { $type: "array" },
+        $expr: {
+          $gt: [
+            {
+              $size: {
+                $filter: {
+                  input: "$articlesJson",
+                  as: "article",
+                  cond: expiredLatestArticle,
+                },
+              },
+            },
+            0,
+          ],
+        },
+      },
+      [
+        {
+          $set: {
+            articlesJson: {
+              $filter: {
+                input: "$articlesJson",
+                as: "article",
+                cond: { $not: [expiredLatestArticle] },
+              },
+            },
+          },
+        },
+      ],
+    );
+    const emptyLatestResult = await latestCollection.deleteMany({
+      articlesJson: { $size: 0 },
+    });
 
     console.log(
-      `Removed ${rawResult.deletedCount} old documents from aresRaw and ${dataResult.deletedCount} from aresData (before ${cutoff.toISOString()})`,
+      `Removed ${rawResult.deletedCount} old documents from aresRaw and ${dataResult.deletedCount} from aresData; trimmed expired articles from ${latestResult.modifiedCount} latest documents and removed ${emptyLatestResult.deletedCount} empty latest documents (before ${cutoff.toISOString()})`,
     );
     return {
       aresRaw: rawResult.deletedCount,
       aresData: dataResult.deletedCount,
+      latestDocumentsUpdated: latestResult.modifiedCount,
+      latestDocumentsDeleted: emptyLatestResult.deletedCount,
     };
   } finally {
     await client.close();
